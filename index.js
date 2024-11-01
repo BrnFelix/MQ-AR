@@ -3,14 +3,14 @@ const mongoose = require('mongoose');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 
+require('dotenv').config();
+
 const app = express();
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
 
 // Conexão com o MongoDB
-mongoose.connect('mongodb://localhost:27017/air-quality-monitor', {
-  useNewUrlParser: true,
-  useUnifiedTopology: true,
-}).then(() => {
+const MONGODB_URI = String(process.env.MONGODB_URI);
+mongoose.connect(MONGODB_URI).then(() => {
   console.log('Conectado ao MongoDB! Servidor rodando na porta ' + PORT);
 }).catch((err) => {
   console.error('Erro ao conectar ao MongoDB:', err);
@@ -75,6 +75,12 @@ const authenticateToken = (req, res, next) => {
 // Registro de usuário
 app.post('/api/register', async (req, res) => {
   const { username, password, email } = req.body;
+
+  const existingUser = await User.findOne({ email });
+  if (existingUser) {
+    return res.status(400).json({ error: 'Usuário já existe' });
+  }
+
   const hashedPassword = await bcrypt.hash(password, 10);
 
   const newUser = new User({
@@ -87,6 +93,8 @@ app.post('/api/register', async (req, res) => {
 
   try {
     const savedUser = await newUser.save();
+    console.log('Dados do usuário:', newUser);
+
     res.status(201).send({
       _id: savedUser._id,
       username: savedUser.username,
