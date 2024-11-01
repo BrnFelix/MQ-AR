@@ -2,6 +2,7 @@ const express = require('express');
 const mongoose = require('mongoose');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
+const cors = require('cors');
 
 require('dotenv').config();
 
@@ -15,6 +16,14 @@ mongoose.connect(MONGODB_URI).then(() => {
 }).catch((err) => {
   console.error('Erro ao conectar ao MongoDB:', err);
 });
+
+const corsOptions = {
+  origin: process.env.CORS_ORIGIN || 'http://localhost:3001',
+  methods: ['GET', 'POST', 'PUT', 'DELETE'], 
+  allowedHeaders: ['Content-Type', 'Authorization'],
+};
+
+app.use(cors(corsOptions));
 
 app.use(express.json()); // Middleware para analisar JSON
 
@@ -93,7 +102,6 @@ app.post('/api/register', async (req, res) => {
 
   try {
     const savedUser = await newUser.save();
-    console.log('Dados do usuário:', newUser);
 
     res.status(201).send({
       _id: savedUser._id,
@@ -110,8 +118,8 @@ app.post('/api/register', async (req, res) => {
 
 // Login de usuário
 app.post('/api/login', async (req, res) => {
-  const { username, password } = req.body;
-  const user = await User.findOne({ username });
+  const { email, password } = req.body;
+  const user = await User.findOne({ email });
 
   if (!user || !(await bcrypt.compare(password, user.password))) {
     return res.status(401).json({ error: 'Usuário ou senha inválidos' });
