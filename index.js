@@ -65,17 +65,44 @@ const readingSchema = new mongoose.Schema({
 
 const Reading = mongoose.model('Reading', readingSchema);
 
+// Configuração de chaves secretas e duração dos tokens
+const ACCESS_TOKEN_SECRET = 'access_secret_key';
+const REFRESH_TOKEN_SECRET = 'refresh_secret_key';
+const ACCESS_TOKEN_EXPIRATION = '15m';
+const REFRESH_TOKEN_EXPIRATION = '7d';
+
+function generateAccessToken(payload) {
+  return jwt.sign(payload, ACCESS_TOKEN_SECRET, { expiresIn: ACCESS_TOKEN_EXPIRATION });
+}
+
+function generateRefreshToken(payload) {
+  return jwt.sign(payload, REFRESH_TOKEN_SECRET, { expiresIn: REFRESH_TOKEN_EXPIRATION });
+}
+
 // Middleware para verificar o token JWT
 const authenticateToken = (req, res, next) => {
   const token = req.headers['authorization']?.split(' ')[1];
   if (!token) return res.sendStatus(401);
 
-  jwt.verify(token, 'secret_key', (err, user) => {
+  jwt.verify(token, ACCESS_TOKEN_SECRET, (err, user) => {
     if (err) return res.sendStatus(403);
     req.user = user; // Salva o usuário decifrado no request
     next();
   });
 };
+
+// Middleware para verificar o refresh token
+const authenticateRefreshToken = (req, res, next) => {
+  const token = req.headers['authorization']?.split(' ')[1];
+  if (!token) return res.sendStatus(401);
+
+  jwt.verify(token, REFRESH_TOKEN_SECRET, (err, user) => {
+    if (err) return res.sendStatus(403);
+    req.user = user;
+    next();
+  });
+};
+
 
 // ==================
 // Rotas de Usuários
@@ -116,17 +143,42 @@ app.post('/api/register', async (req, res) => {
   }
 });
 
-// Login de usuário
+// Endpoint de login do usuário
 app.post('/api/login', async (req, res) => {
   const { email, password } = req.body;
   const user = await User.findOne({ email });
 
+  // Verifica se o usuário existe e se a senha está correta
   if (!user || !(await bcrypt.compare(password, user.password))) {
     return res.status(401).json({ error: 'Usuário ou senha inválidos' });
   }
 
-  const token = jwt.sign({ userId: user._id }, 'secret_key', { expiresIn: '1h' });
-  res.json({ message: 'Login realizado com sucesso', token });
+  const payload = { userId: user._id, email: user.email, username: user.username };
+
+  const accessToken = generateAccessToken(payload);
+  const refreshToken = generateRefreshToken(payload);
+
+  res.json({
+    message: 'Login realizado com sucesso',
+    accessToken,
+    refreshToken
+  });
+});
+
+// Endpoint de Refresh Token
+app.post('/api/refresh', authenticateRefreshToken, async (req, res) => {
+  try {
+    const { userId } = req.user;
+    const user = await User.findOne({ _id: userId });
+    const { email, username } = user;
+    
+    // Gerar um novo accessToken usando os dados do refresh token decodificado
+    const newAccessToken = generateAccessToken({ userId, email, username });
+
+    res.json({ accessToken: newAccessToken });
+  } catch (err) {
+    return res.status(403).json({ error: 'Refresh token inválido' });
+  }
 });
 
 // Obter informações do usuário
@@ -153,10 +205,10 @@ app.put('/api/users/', authenticateToken, async (req, res) => {
     if (!user) {
       return res.status(404).json({ error: 'Usuário não encontrado' });
     }
-
     // Verifica se a senha atual foi fornecida e se a nova senha é válida
     if (currentPassword && newPassword) {
-      const isMatch = bcrypt.compare(currentPassword, user.password);
+      const isMatch = await bcrypt.compare(currentPassword, user.password);
+      console.log(currentPassword, newPassword, user.password, isMatch);
       if (!isMatch) {
         return res.status(401).json({ error: 'Senha atual inválida' });
       }
