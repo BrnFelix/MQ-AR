@@ -130,9 +130,9 @@ app.post('/api/login', async (req, res) => {
 });
 
 // Obter informações do usuário
-app.get('/api/users/:id', authenticateToken, async (req, res) => {
-  const { id } = req.params;
+app.get('/api/users/', authenticateToken, async (req, res) => {
   try {
+    const id = req.user.userId;
     const user = await User.findById(id);
     if (!user) {
       return res.status(404).json({ error: 'Usuário não encontrado' });
@@ -144,11 +144,10 @@ app.get('/api/users/:id', authenticateToken, async (req, res) => {
 });
 
 // Atualizar usuário
-app.put('/api/users/:id', authenticateToken, async (req, res) => {
-  const { id } = req.params;
-  const { username, email } = req.body;
-
+app.put('/api/users/', authenticateToken, async (req, res) => {
   try {
+    const id = req.user.userId;
+    const { username, email } = req.body;
     const updatedUser = await User.findByIdAndUpdate(
       id,
       { username, email, updatedAt: new Date() },
