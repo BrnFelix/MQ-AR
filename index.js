@@ -147,15 +147,39 @@ app.get('/api/users/', authenticateToken, async (req, res) => {
 app.put('/api/users/', authenticateToken, async (req, res) => {
   try {
     const id = req.user.userId;
-    const { username, email } = req.body;
-    const updatedUser = await User.findByIdAndUpdate(
-      id,
-      { username, email, updatedAt: new Date() },
-      { new: true }
-    );
-    if (!updatedUser) {
+    const { username, email, currentPassword, newPassword } = req.body;
+
+    const user = await User.findById(id);
+    if (!user) {
       return res.status(404).json({ error: 'Usuário não encontrado' });
     }
+
+    // Verifica se a senha atual foi fornecida e se a nova senha é válida
+    if (currentPassword && newPassword) {
+      const isMatch = bcrypt.compare(currentPassword, user.password);
+      if (!isMatch) {
+        return res.status(401).json({ error: 'Senha atual inválida' });
+      }
+
+      const hashedNewPassword = await bcrypt.hash(newPassword, 10);
+      user.password = hashedNewPassword;
+    }
+
+    if(email) {
+      const existingUser = await User.findOne({ email});
+
+      if (existingUser && existingUser._id != id) {
+        return res.status(400).json({ error: 'Email já cadastrado' });
+      }
+
+      user.email = email;
+    }
+
+    // atualiza outros dados do usuário, se houverem
+    user.username = username || user.username;
+    user.updatedAt = new Date();
+
+    const updatedUser = await user.save();
     res.status(200).json(updatedUser);
   } catch (err) {
     res.status(500).json({ error: 'Erro ao atualizar usuário' });
