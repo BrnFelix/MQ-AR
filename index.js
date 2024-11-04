@@ -44,7 +44,7 @@ const User = mongoose.model('User', userSchema);
 
 // Esquema de Dispositivos
 const deviceSchema = new mongoose.Schema({
-  deviceId: String, // ID único do ESP32
+  deviceId: { type: String, unique: true }, // ID único do ESP32
   userId: mongoose.Schema.Types.ObjectId, // Referência ao usuário
   deviceName: String,
   createdAt: { type: Date, default: Date.now },
@@ -285,11 +285,16 @@ app.post('/api/devices', authenticateToken, async (req, res) => {
 });
 
 // Listar dispositivos de um usuário
-app.get('/api/devices/:userId', authenticateToken, async (req, res) => {
-  const { userId } = req.params;
+app.get('/api/devices/', authenticateToken, async (req, res) => {
+  const { userId } = req.user;
 
   try {
-    const devices = await Device.find({ userId });
+    // Buscando todos os dispositivos do usuário, mas apenas os que têm o campo deviceName
+    const devices = await Device.find({
+      userId,
+      deviceName: { $exists: true, $ne: null }
+    });
+
     res.json(devices);
   } catch (err) {
     res.status(500).json({ error: 'Erro ao listar dispositivos' });
@@ -300,13 +305,14 @@ app.get('/api/devices/:userId', authenticateToken, async (req, res) => {
 app.put('/api/devices/:id', authenticateToken, async (req, res) => {
   const { id } = req.params;
   const { deviceId, deviceName } = req.body;
-
+  
   try {
     const updatedDevice = await Device.findByIdAndUpdate(
       id,
       { deviceId, deviceName, updatedAt: new Date() },
       { new: true }
     );
+    
     if (!updatedDevice) {
       return res.status(404).json({ error: 'Dispositivo não encontrado' });
     }
