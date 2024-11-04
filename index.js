@@ -165,26 +165,31 @@ app.delete('/api/users/:id', authenticateToken, async (req, res) => {
 // Rotas de Dispositivos
 // ==================
 
-// Registro de dispositivo
+// Registro de dispositivo (com lógica para reutilizar ID)
 app.post('/api/devices', authenticateToken, async (req, res) => {
-  const { deviceId, deviceName } = req.body;
   const userId = req.user.userId; // Obtém o ID do usuário do token
 
-  const newDevice = new Device({ deviceId, userId, deviceName });
-
   try {
-    const savedDevice = await newDevice.save();
+    // Procura um dispositivo cujo deviceName (apelido) seja null
+    let device = await Device.findOne({ userId, deviceName: null });
+
+    if (!device) {
+      // Se não encontrar, cria um novo dispositivo apenas com o deviceId
+      const newDevice = new Device({ deviceId: new mongoose.Types.ObjectId().toString(), userId });
+      device = await newDevice.save();
+    }
+
     res.status(201).json({
-      _id: savedDevice._id,
-      deviceId: savedDevice.deviceId,
-      deviceName: savedDevice.deviceName,
-      userId: savedDevice.userId,
-      createdAt: savedDevice.createdAt,
-      updatedAt: savedDevice.updatedAt,
-      message: "Dispositivo registrado com sucesso!"
+      _id: device._id,
+      deviceId: device.deviceId,
+      deviceName: device.deviceName,
+      userId: device.userId,
+      createdAt: device.createdAt,
+      updatedAt: device.updatedAt,
+      message: "ID de dispositivo obtido com sucesso!"
     });
   } catch (err) {
-    res.status(500).json({ error: 'Erro ao registrar dispositivo' });
+    res.status(500).json({ error: 'Erro ao registrar ou buscar dispositivo' });
   }
 });
 
@@ -263,43 +268,9 @@ app.get('/api/readings/:deviceId', authenticateToken, async (req, res) => {
   }
 });
 
-// Atualizar leitura
-app.put('/api/readings/:id', authenticateToken, async (req, res) => {
-  const { id } = req.params;
-  const { temperature, humidity, gasLevel } = req.body;
-
-  try {
-    const updatedReading = await Reading.findByIdAndUpdate(
-      id,
-      { temperature, humidity, gasLevel, updatedAt: new Date() },
-      { new: true }
-    );
-    if (!updatedReading) {
-      return res.status(404).json({ error: 'Leitura não encontrada' });
-    }
-    res.status(200).json(updatedReading);
-  } catch (err) {
-    res.status(500).json({ error: 'Erro ao atualizar leitura' });
-  }
-});
-
-// Deletar leitura
-app.delete('/api/readings/:id', authenticateToken, async (req, res) => {
-  const { id } = req.params;
-  try {
-    const deletedReading = await Reading.findByIdAndDelete(id);
-    if (!deletedReading) {
-      return res.status(404).json({ error: 'Leitura não encontrada' });
-    }
-    res.status(200).json({ message: 'Leitura deletada com sucesso' });
-  } catch (err) {
-    res.status(500).json({ error: 'Erro ao deletar leitura' });
-  }
-});
-
 // ==================
-// Iniciar Servidor
+// Inicialização do Servidor
 // ==================
 app.listen(PORT, () => {
-  console.log(`Servidor rodando na porta ${PORT}`);
+  console.log(`Servidor rodando em http://localhost:${PORT}`);
 });
