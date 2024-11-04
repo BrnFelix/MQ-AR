@@ -307,6 +307,10 @@ app.put('/api/devices/:id', authenticateToken, async (req, res) => {
   const { deviceId, deviceName } = req.body;
   
   try {
+    if(deviceName.length < 3) {
+      return res.status(400).json({ error: 'Nome do dispositivo deve ter no mínimo 3 caracteres' });
+    }
+
     const updatedDevice = await Device.findByIdAndUpdate(
       id,
       { deviceId, deviceName, updatedAt: new Date() },
