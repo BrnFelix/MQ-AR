@@ -2,19 +2,28 @@ const express = require('express');
 const mongoose = require('mongoose');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
+const cors = require('cors');
+
+require('dotenv').config();
 
 const app = express();
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
 
 // Conexão com o MongoDB
-mongoose.connect('mongodb://localhost:27017/air-quality-monitor', {
-  useNewUrlParser: true,
-  useUnifiedTopology: true,
-}).then(() => {
+const MONGODB_URI = String(process.env.MONGODB_URI);
+mongoose.connect(MONGODB_URI).then(() => {
   console.log('Conectado ao MongoDB! Servidor rodando na porta ' + PORT);
 }).catch((err) => {
   console.error('Erro ao conectar ao MongoDB:', err);
 });
+
+const corsOptions = {
+  origin: process.env.CORS_ORIGIN || 'http://localhost:3001',
+  methods: ['GET', 'POST', 'PUT', 'DELETE'], 
+  allowedHeaders: ['Content-Type', 'Authorization'],
+};
+
+app.use(cors(corsOptions));
 
 app.use(express.json()); // Middleware para analisar JSON
 
@@ -56,17 +65,44 @@ const readingSchema = new mongoose.Schema({
 
 const Reading = mongoose.model('Reading', readingSchema);
 
+// Configuração de chaves secretas e duração dos tokens
+const ACCESS_TOKEN_SECRET = 'access_secret_key';
+const REFRESH_TOKEN_SECRET = 'refresh_secret_key';
+const ACCESS_TOKEN_EXPIRATION = '15m';
+const REFRESH_TOKEN_EXPIRATION = '7d';
+
+function generateAccessToken(payload) {
+  return jwt.sign(payload, ACCESS_TOKEN_SECRET, { expiresIn: ACCESS_TOKEN_EXPIRATION });
+}
+
+function generateRefreshToken(payload) {
+  return jwt.sign(payload, REFRESH_TOKEN_SECRET, { expiresIn: REFRESH_TOKEN_EXPIRATION });
+}
+
 // Middleware para verificar o token JWT
 const authenticateToken = (req, res, next) => {
   const token = req.headers['authorization']?.split(' ')[1];
   if (!token) return res.sendStatus(401);
 
-  jwt.verify(token, 'secret_key', (err, user) => {
+  jwt.verify(token, ACCESS_TOKEN_SECRET, (err, user) => {
     if (err) return res.sendStatus(403);
     req.user = user; // Salva o usuário decifrado no request
     next();
   });
 };
+
+// Middleware para verificar o refresh token
+const authenticateRefreshToken = (req, res, next) => {
+  const token = req.headers['authorization']?.split(' ')[1];
+  if (!token) return res.sendStatus(401);
+
+  jwt.verify(token, REFRESH_TOKEN_SECRET, (err, user) => {
+    if (err) return res.sendStatus(403);
+    req.user = user;
+    next();
+  });
+};
+
 
 // ==================
 // Rotas de Usuários
@@ -75,6 +111,12 @@ const authenticateToken = (req, res, next) => {
 // Registro de usuário
 app.post('/api/register', async (req, res) => {
   const { username, password, email } = req.body;
+
+  const existingUser = await User.findOne({ email });
+  if (existingUser) {
+    return res.status(400).json({ error: 'Usuário já existe' });
+  }
+
   const hashedPassword = await bcrypt.hash(password, 10);
 
   const newUser = new User({
@@ -87,6 +129,7 @@ app.post('/api/register', async (req, res) => {
 
   try {
     const savedUser = await newUser.save();
+
     res.status(201).send({
       _id: savedUser._id,
       username: savedUser.username,
@@ -100,23 +143,48 @@ app.post('/api/register', async (req, res) => {
   }
 });
 
-// Login de usuário
+// Endpoint de login do usuário
 app.post('/api/login', async (req, res) => {
-  const { username, password } = req.body;
-  const user = await User.findOne({ username });
+  const { email, password } = req.body;
+  const user = await User.findOne({ email });
 
+  // Verifica se o usuário existe e se a senha está correta
   if (!user || !(await bcrypt.compare(password, user.password))) {
     return res.status(401).json({ error: 'Usuário ou senha inválidos' });
   }
 
-  const token = jwt.sign({ userId: user._id }, 'secret_key', { expiresIn: '1h' });
-  res.json({ message: 'Login realizado com sucesso', token });
+  const payload = { userId: user._id, email: user.email, username: user.username };
+
+  const accessToken = generateAccessToken(payload);
+  const refreshToken = generateRefreshToken(payload);
+
+  res.json({
+    message: 'Login realizado com sucesso',
+    accessToken,
+    refreshToken
+  });
+});
+
+// Endpoint de Refresh Token
+app.post('/api/refresh', authenticateRefreshToken, async (req, res) => {
+  try {
+    const { userId } = req.user;
+    const user = await User.findOne({ _id: userId });
+    const { email, username } = user;
+    
+    // Gerar um novo accessToken usando os dados do refresh token decodificado
+    const newAccessToken = generateAccessToken({ userId, email, username });
+
+    res.json({ accessToken: newAccessToken });
+  } catch (err) {
+    return res.status(403).json({ error: 'Refresh token inválido' });
+  }
 });
 
 // Obter informações do usuário
-app.get('/api/users/:id', authenticateToken, async (req, res) => {
-  const { id } = req.params;
+app.get('/api/users/', authenticateToken, async (req, res) => {
   try {
+    const id = req.user.userId;
     const user = await User.findById(id);
     if (!user) {
       return res.status(404).json({ error: 'Usuário não encontrado' });
@@ -128,19 +196,42 @@ app.get('/api/users/:id', authenticateToken, async (req, res) => {
 });
 
 // Atualizar usuário
-app.put('/api/users/:id', authenticateToken, async (req, res) => {
-  const { id } = req.params;
-  const { username, email } = req.body;
-
+app.put('/api/users/', authenticateToken, async (req, res) => {
   try {
-    const updatedUser = await User.findByIdAndUpdate(
-      id,
-      { username, email, updatedAt: new Date() },
-      { new: true }
-    );
-    if (!updatedUser) {
+    const id = req.user.userId;
+    const { username, email, currentPassword, newPassword } = req.body;
+
+    const user = await User.findById(id);
+    if (!user) {
       return res.status(404).json({ error: 'Usuário não encontrado' });
     }
+    // Verifica se a senha atual foi fornecida e se a nova senha é válida
+    if (currentPassword && newPassword) {
+      const isMatch = await bcrypt.compare(currentPassword, user.password);
+      console.log(currentPassword, newPassword, user.password, isMatch);
+      if (!isMatch) {
+        return res.status(401).json({ error: 'Senha atual inválida' });
+      }
+
+      const hashedNewPassword = await bcrypt.hash(newPassword, 10);
+      user.password = hashedNewPassword;
+    }
+
+    if(email) {
+      const existingUser = await User.findOne({ email});
+
+      if (existingUser && existingUser._id != id) {
+        return res.status(400).json({ error: 'Email já cadastrado' });
+      }
+
+      user.email = email;
+    }
+
+    // atualiza outros dados do usuário, se houverem
+    user.username = username || user.username;
+    user.updatedAt = new Date();
+
+    const updatedUser = await user.save();
     res.status(200).json(updatedUser);
   } catch (err) {
     res.status(500).json({ error: 'Erro ao atualizar usuário' });
