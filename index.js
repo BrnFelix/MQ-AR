@@ -56,8 +56,8 @@ const readingSchema = new mongoose.Schema({
 const Reading = mongoose.model('Reading', readingSchema);
 
 // Configuração de chaves secretas e duração dos tokens
-const ACCESS_TOKEN_SECRET = 'access_secret_key';
-const REFRESH_TOKEN_SECRET = 'refresh_secret_key';
+const ACCESS_TOKEN_SECRET = process.env.ACCESS_TOKEN_SECRET;
+const REFRESH_TOKEN_SECRET = process.env.MONGODB_URI;
 const ACCESS_TOKEN_EXPIRATION = '15m';
 const REFRESH_TOKEN_EXPIRATION = '7d';
 
