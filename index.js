@@ -166,4 +166,6 @@ app.listen(PORT, () => {
   console.log(`Servidor rodando na porta ${PORT}`);
 });
 
-module.exports = app; // Exporta o app do Express
+module.exports = (req, res) => {
+  res.status(200).send("Sua aplicação está funcionando!");
+};
