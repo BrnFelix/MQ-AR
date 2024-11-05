@@ -8,8 +8,8 @@ require('dotenv').config();
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-app.use(cors()); 
-app.use(express.json()); // Middleware para analisar JSON
+app.use(cors());
+app.use(express.json());
 
 // Conexão com o MongoDB
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/monitoramento_qualidade_ar';
@@ -57,7 +57,7 @@ const Reading = mongoose.model('Reading', readingSchema);
 
 // Configuração de chaves secretas e duração dos tokens
 const ACCESS_TOKEN_SECRET = process.env.ACCESS_TOKEN_SECRET;
-const REFRESH_TOKEN_SECRET = process.env.MONGODB_URI;
+const REFRESH_TOKEN_SECRET = process.env.REFRESH_TOKEN_SECRET;
 const ACCESS_TOKEN_EXPIRATION = '15m';
 const REFRESH_TOKEN_EXPIRATION = '7d';
 
@@ -73,7 +73,7 @@ function generateRefreshToken(payload) {
 const authenticateToken = (req, res, next) => {
   const token = req.headers['authorization']?.split(' ')[1];
   if (!token) return res.sendStatus(401);
-  
+
   jwt.verify(token, ACCESS_TOKEN_SECRET, (err, user) => {
     if (err) return res.sendStatus(403);
     req.user = user;
@@ -88,8 +88,8 @@ const authenticateToken = (req, res, next) => {
 // Registro de usuário
 app.post('/api/register', async (req, res) => {
   const { username, password, email } = req.body;
-
   const existingUser = await User.findOne({ email });
+
   if (existingUser) {
     return res.status(400).json({ error: 'Usuário já existe' });
   }
@@ -105,7 +105,7 @@ app.post('/api/register', async (req, res) => {
   }
 });
 
-// Endpoint de login do usuário
+// Login de usuário
 app.post('/api/login', async (req, res) => {
   const { email, password } = req.body;
   const user = await User.findOne({ email });
@@ -128,19 +128,33 @@ app.post('/api/login', async (req, res) => {
 // Registro de dispositivo
 app.post('/api/devices', authenticateToken, async (req, res) => {
   const userId = req.user.userId;
+  const { deviceId, deviceName } = req.body;
+
+  const existingDevice = await Device.findOne({ deviceId, userId });
+  if (existingDevice) {
+    return res.status(400).json({ error: 'Dispositivo já cadastrado para o usuário' });
+  }
+
+  const newDevice = new Device({ deviceId, userId, deviceName });
 
   try {
-    const { deviceId, deviceName } = req.body;
-    const existingDevice = await Device.findOne({ deviceId, userId });
-    if (existingDevice) {
-      return res.status(400).json({ error: 'Dispositivo já cadastrado para o usuário' });
-    }
-
-    const newDevice = new Device({ deviceId, userId, deviceName });
     await newDevice.save();
     res.status(201).json(newDevice);
   } catch (err) {
     res.status(500).json({ error: 'Erro ao registrar dispositivo' });
+  }
+});
+
+// Remover dispositivo
+app.delete('/api/devices/:deviceId', authenticateToken, async (req, res) => {
+  try {
+    const device = await Device.findOneAndDelete({ deviceId: req.params.deviceId, userId: req.user.userId });
+    if (!device) {
+      return res.status(404).json({ error: 'Dispositivo não encontrado' });
+    }
+    res.status(200).json({ message: 'Dispositivo removido com sucesso' });
+  } catch (err) {
+    res.status(500).json({ error: 'Erro ao remover dispositivo' });
   }
 });
 
@@ -151,13 +165,23 @@ app.post('/api/devices', authenticateToken, async (req, res) => {
 // Registrar leitura
 app.post('/api/readings', authenticateToken, async (req, res) => {
   const { deviceId, temperature, humidity, gasLevel } = req.body;
-  
+
   try {
     const newReading = new Reading({ deviceId, temperature, humidity, gasLevel });
     await newReading.save();
     res.status(201).json(newReading);
   } catch (err) {
     res.status(500).json({ error: 'Erro ao registrar leitura' });
+  }
+});
+
+// Listar leituras de um dispositivo
+app.get('/api/readings/:deviceId', authenticateToken, async (req, res) => {
+  try {
+    const readings = await Reading.find({ deviceId: req.params.deviceId }).sort({ timestamp: -1 });
+    res.status(200).json(readings);
+  } catch (err) {
+    res.status(500).json({ error: 'Erro ao buscar leituras' });
   }
 });
 
