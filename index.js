@@ -9,23 +9,19 @@ require('dotenv').config();
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+app.use(cors());
+
 // Conexão com o MongoDB
-const MONGODB_URI = String(process.env.MONGODB_URI);
-mongoose.connect(MONGODB_URI).then(() => {
-  console.log('Conectado ao MongoDB! Servidor rodando na porta ' + PORT);
-}).catch((err) => {
-  console.error('Erro ao conectar ao MongoDB:', err);
-});
+const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/monitoramento_qualidade_ar';
+mongoose.connect(MONGODB_URI, { useNewUrlParser: true, useUnifiedTopology: true })
+  .then(() => {
+    console.log('Conectado ao MongoDB! Servidor rodando na porta ' + PORT);
+  })
+  .catch((err) => {
+    console.error('Erro ao conectar ao MongoDB:', err);
+  });
 
-const corsOptions = {
-  origin: process.env.CORS_ORIGIN || 'http://localhost:3001',
-  methods: ['GET', 'POST', 'PUT', 'DELETE'], 
-  allowedHeaders: ['Content-Type', 'Authorization'],
-};
-
-app.use(cors(corsOptions));
-
-app.use(express.json()); // Middleware para analisar JSON
+app.use(express.json());
 
 // ==================
 // Definição dos Esquemas e Modelos
@@ -33,9 +29,9 @@ app.use(express.json()); // Middleware para analisar JSON
 
 // Esquema de Usuários
 const userSchema = new mongoose.Schema({
-  username: String,
-  password: String, // Será armazenada como hash
-  email: String,
+  username: { type: String, required: true },
+  password: { type: String, required: true },
+  email: { type: String, required: true, unique: true },
   createdAt: { type: Date, default: Date.now },
   updatedAt: { type: Date, default: Date.now },
 });
@@ -44,9 +40,9 @@ const User = mongoose.model('User', userSchema);
 
 // Esquema de Dispositivos
 const deviceSchema = new mongoose.Schema({
-  deviceId: { type: String, unique: true }, // ID único do ESP32
-  userId: mongoose.Schema.Types.ObjectId, // Referência ao usuário
-  deviceName: String,
+  deviceId: { type: String, unique: true, required: true },
+  userId: { type: mongoose.Schema.Types.ObjectId, required: true },
+  deviceName: { type: String, required: true },
   createdAt: { type: Date, default: Date.now },
   updatedAt: { type: Date, default: Date.now },
 });
@@ -55,19 +51,19 @@ const Device = mongoose.model('Device', deviceSchema);
 
 // Esquema de Leituras
 const readingSchema = new mongoose.Schema({
-  deviceId: mongoose.Schema.Types.ObjectId, // Referência ao dispositivo
+  deviceId: { type: mongoose.Schema.Types.ObjectId, required: true },
   timestamp: { type: Date, default: Date.now },
-  temperature: Number,
-  humidity: Number,
-  gasLevel: Number, // Poluição em ppm
+  temperature: { type: Number, required: true },
+  humidity: { type: Number, required: true },
+  gasLevel: { type: Number, required: true },
   createdAt: { type: Date, default: Date.now },
 });
 
 const Reading = mongoose.model('Reading', readingSchema);
 
 // Configuração de chaves secretas e duração dos tokens
-const ACCESS_TOKEN_SECRET = 'access_secret_key';
-const REFRESH_TOKEN_SECRET = 'refresh_secret_key';
+const ACCESS_TOKEN_SECRET = process.env.ACCESS_TOKEN_SECRET || 'access_secret_key';
+const REFRESH_TOKEN_SECRET = process.env.REFRESH_TOKEN_SECRET || 'refresh_secret_key';
 const ACCESS_TOKEN_EXPIRATION = '15m';
 const REFRESH_TOKEN_EXPIRATION = '7d';
 
@@ -103,7 +99,6 @@ const authenticateRefreshToken = (req, res, next) => {
   });
 };
 
-
 // ==================
 // Rotas de Usuários
 // ==================
@@ -112,24 +107,22 @@ const authenticateRefreshToken = (req, res, next) => {
 app.post('/api/register', async (req, res) => {
   const { username, password, email } = req.body;
 
-  const existingUser = await User.findOne({ email });
-  if (existingUser) {
-    return res.status(400).json({ error: 'Usuário já existe' });
-  }
-
-  const hashedPassword = await bcrypt.hash(password, 10);
-
-  const newUser = new User({
-    username,
-    password: hashedPassword,
-    email,
-    createdAt: new Date(),
-    updatedAt: new Date()
-  });
-
   try {
-    const savedUser = await newUser.save();
+    const existingUser = await User.findOne({ email });
+    if (existingUser) {
+      return res.status(400).json({ error: 'Usuário já existe' });
+    }
 
+    const hashedPassword = await bcrypt.hash(password, 10);
+    const newUser = new User({
+      username,
+      password: hashedPassword,
+      email,
+      createdAt: new Date(),
+      updatedAt: new Date()
+    });
+
+    const savedUser = await newUser.save();
     res.status(201).send({
       _id: savedUser._id,
       username: savedUser.username,
@@ -146,23 +139,30 @@ app.post('/api/register', async (req, res) => {
 // Endpoint de login do usuário
 app.post('/api/login', async (req, res) => {
   const { email, password } = req.body;
-  const user = await User.findOne({ email });
+  
+  try {
+    const user = await User.findOne({ email });
 
-  // Verifica se o usuário existe e se a senha está correta
-  if (!user || !(await bcrypt.compare(password, user.password))) {
-    return res.status(401).json({ error: 'Usuário ou senha inválidos' });
+    if (!user) {
+      return res.status(401).json({ error: 'Usuário não encontrado' });
+    }
+
+    if (!(await bcrypt.compare(password, user.password))) {
+      return res.status(401).json({ error: 'Senha inválida' });
+    }
+
+    const payload = { userId: user._id, email: user.email, username: user.username };
+    const accessToken = generateAccessToken(payload);
+    const refreshToken = generateRefreshToken(payload);
+
+    res.json({
+      message: 'Login realizado com sucesso',
+      accessToken,
+      refreshToken
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Erro ao realizar login' });
   }
-
-  const payload = { userId: user._id, email: user.email, username: user.username };
-
-  const accessToken = generateAccessToken(payload);
-  const refreshToken = generateRefreshToken(payload);
-
-  res.json({
-    message: 'Login realizado com sucesso',
-    accessToken,
-    refreshToken
-  });
 });
 
 // Endpoint de Refresh Token
@@ -170,14 +170,17 @@ app.post('/api/refresh', authenticateRefreshToken, async (req, res) => {
   try {
     const { userId } = req.user;
     const user = await User.findOne({ _id: userId });
+
+    if (!user) {
+      return res.status(403).json({ error: 'Usuário não encontrado' });
+    }
+
     const { email, username } = user;
-    
-    // Gerar um novo accessToken usando os dados do refresh token decodificado
     const newAccessToken = generateAccessToken({ userId, email, username });
 
     res.json({ accessToken: newAccessToken });
   } catch (err) {
-    return res.status(403).json({ error: 'Refresh token inválido' });
+    res.status(403).json({ error: 'Refresh token inválido' });
   }
 });
 
@@ -205,10 +208,10 @@ app.put('/api/users/', authenticateToken, async (req, res) => {
     if (!user) {
       return res.status(404).json({ error: 'Usuário não encontrado' });
     }
+
     // Verifica se a senha atual foi fornecida e se a nova senha é válida
     if (currentPassword && newPassword) {
       const isMatch = await bcrypt.compare(currentPassword, user.password);
-      console.log(currentPassword, newPassword, user.password, isMatch);
       if (!isMatch) {
         return res.status(401).json({ error: 'Senha atual inválida' });
       }
@@ -217,17 +220,15 @@ app.put('/api/users/', authenticateToken, async (req, res) => {
       user.password = hashedNewPassword;
     }
 
-    if(email) {
-      const existingUser = await User.findOne({ email});
-
+    if (email) {
+      const existingUser = await User.findOne({ email });
       if (existingUser && existingUser._id != id) {
         return res.status(400).json({ error: 'Email já cadastrado' });
       }
-
       user.email = email;
     }
 
-    // atualiza outros dados do usuário, se houverem
+    // Atualiza outros dados do usuário, se houver
     user.username = username || user.username;
     user.updatedAt = new Date();
 
@@ -256,87 +257,43 @@ app.delete('/api/users/:id', authenticateToken, async (req, res) => {
 // Rotas de Dispositivos
 // ==================
 
-// Registro de dispositivo (com lógica para reutilizar ID)
+// Registro de dispositivo
 app.post('/api/devices', authenticateToken, async (req, res) => {
-  const userId = req.user.userId; // Obtém o ID do usuário do token
+  const userId = req.user.userId;
 
   try {
-    // Procura um dispositivo cujo deviceName (apelido) seja null
-    let device = await Device.findOne({ userId, deviceName: null });
+    const { deviceId, deviceName } = req.body;
 
-    if (!device) {
-      // Se não encontrar, cria um novo dispositivo apenas com o deviceId
-      const newDevice = new Device({ deviceId: new mongoose.Types.ObjectId().toString(), userId });
-      device = await newDevice.save();
+    // Verifica se o dispositivo já existe
+    const existingDevice = await Device.findOne({ deviceId });
+    if (existingDevice) {
+      return res.status(400).json({ error: 'Dispositivo já cadastrado' });
     }
 
-    res.status(201).json({
-      _id: device._id,
-      deviceId: device.deviceId,
-      deviceName: device.deviceName,
-      userId: device.userId,
-      createdAt: device.createdAt,
-      updatedAt: device.updatedAt,
-      message: "ID de dispositivo obtido com sucesso!"
-    });
-  } catch (err) {
-    res.status(500).json({ error: 'Erro ao registrar ou buscar dispositivo' });
-  }
-});
-
-// Listar dispositivos de um usuário
-app.get('/api/devices/', authenticateToken, async (req, res) => {
-  const { userId } = req.user;
-
-  try {
-    // Buscando todos os dispositivos do usuário, mas apenas os que têm o campo deviceName
-    const devices = await Device.find({
+    const newDevice = new Device({
+      deviceId,
       userId,
-      deviceName: { $exists: true, $ne: null }
+      deviceName,
+      createdAt: new Date(),
+      updatedAt: new Date()
     });
 
-    res.json(devices);
+    await newDevice.save();
+    res.status(201).json({ message: 'Dispositivo registrado com sucesso', deviceId });
   } catch (err) {
-    res.status(500).json({ error: 'Erro ao listar dispositivos' });
+    res.status(500).json({ error: 'Erro ao registrar dispositivo' });
   }
 });
 
-// Atualizar dispositivo
-app.put('/api/devices/:id', authenticateToken, async (req, res) => {
-  const { id } = req.params;
-  const { deviceId, deviceName } = req.body;
-  
-  try {
-    if(deviceName.length < 3) {
-      return res.status(400).json({ error: 'Nome do dispositivo deve ter no mínimo 3 caracteres' });
-    }
+// Obter dispositivos do usuário
+app.get('/api/devices', authenticateToken, async (req, res) => {
+  const userId = req.user.userId;
 
-    const updatedDevice = await Device.findByIdAndUpdate(
-      id,
-      { deviceId, deviceName, updatedAt: new Date() },
-      { new: true }
-    );
-    
-    if (!updatedDevice) {
-      return res.status(404).json({ error: 'Dispositivo não encontrado' });
-    }
-    res.status(200).json(updatedDevice);
-  } catch (err) {
-    res.status(500).json({ error: 'Erro ao atualizar dispositivo' });
-  }
-});
-
-// Deletar dispositivo
-app.delete('/api/devices/:id', authenticateToken, async (req, res) => {
-  const { id } = req.params;
   try {
-    const deletedDevice = await Device.findByIdAndDelete(id);
-    if (!deletedDevice) {
-      return res.status(404).json({ error: 'Dispositivo não encontrado' });
-    }
-    res.status(200).json({ message: 'Dispositivo deletado com sucesso' });
+    const devices = await Device.find({ userId });
+    res.status(200).json(devices);
   } catch (err) {
-    res.status(500).json({ error: 'Erro ao deletar dispositivo' });
+    res.status(500).json({ error: 'Erro ao buscar dispositivos' });
   }
 });
 
@@ -344,34 +301,39 @@ app.delete('/api/devices/:id', authenticateToken, async (req, res) => {
 // Rotas de Leituras
 // ==================
 
-// Adicionar leitura de sensor
+// Registro de leituras
 app.post('/api/readings', authenticateToken, async (req, res) => {
   const { deviceId, temperature, humidity, gasLevel } = req.body;
-  const newReading = new Reading({ deviceId, temperature, humidity, gasLevel });
 
   try {
-    const savedReading = await newReading.save();
-    res.status(201).json(savedReading);
+    const newReading = new Reading({
+      deviceId,
+      temperature,
+      humidity,
+      gasLevel,
+      createdAt: new Date()
+    });
+
+    await newReading.save();
+    res.status(201).json({ message: 'Leitura registrada com sucesso' });
   } catch (err) {
-    res.status(500).json({ error: 'Erro ao salvar leitura' });
+    res.status(500).json({ error: 'Erro ao registrar leitura' });
   }
 });
 
-// Listar leituras de um dispositivo
+// Obter leituras de um dispositivo específico
 app.get('/api/readings/:deviceId', authenticateToken, async (req, res) => {
   const { deviceId } = req.params;
 
   try {
-    const readings = await Reading.find({ deviceId });
-    res.json(readings);
+    const readings = await Reading.find({ deviceId }).sort({ createdAt: -1 });
+    res.status(200).json(readings);
   } catch (err) {
-    res.status(500).json({ error: 'Erro ao listar leituras' });
+    res.status(500).json({ error: 'Erro ao buscar leituras' });
   }
 });
 
-// ==================
-// Inicialização do Servidor
-// ==================
+// Inicia o servidor
 app.listen(PORT, () => {
-  console.log(`Servidor rodando em http://localhost:${PORT}`);
+  console.log(`Servidor rodando na porta ${PORT}`);
 });
