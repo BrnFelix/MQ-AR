@@ -56,6 +56,7 @@ const Device = mongoose.model('Device', deviceSchema);
 
 // Esquema de Leituras
 const readingSchema = new mongoose.Schema({
+  userId: mongoose.Schema.Types.ObjectId, // Referência ao usuário
   deviceId: mongoose.Schema.Types.ObjectId, // Referência ao dispositivo
   timestamp: { type: Date, default: Date.now },
   temperature: Number,
@@ -350,7 +351,8 @@ app.delete('/api/devices/:id', authenticateToken, async (req, res) => {
 // Adicionar leitura de sensor
 app.post('/api/readings', authenticateToken, async (req, res) => {
   const { deviceId, temperature, humidity, gasLevel } = req.body;
-  const newReading = new Reading({ deviceId, temperature, humidity, gasLevel });
+  const { userId } = req.user;
+  const newReading = new Reading({ userId, deviceId, temperature, humidity, gasLevel });
 
   try {
     const savedReading = await newReading.save();
@@ -379,6 +381,18 @@ app.get('/api/readings/:deviceId', authenticateToken, async (req, res) => {
     }));
 
     res.json(readingsWithDeviceName);
+  } catch (err) {
+    res.status(500).json({ error: 'Erro ao listar leituras' });
+  }
+});
+
+// Listar todas leituras de um usuario
+app.get('/api/readings/', authenticateToken, async (req, res) => {
+  const { userId } = req.user;
+
+  try {
+    const readings = await Reading.find({ userId });
+    res.json(readings);
   } catch (err) {
     res.status(500).json({ error: 'Erro ao listar leituras' });
   }
