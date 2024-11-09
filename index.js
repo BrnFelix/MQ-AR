@@ -85,7 +85,7 @@ function generateRefreshToken(payload) {
 const authenticateToken = (req, res, next) => {
   const token = req.headers['authorization']?.split(' ')[1];
   if (!token) return res.sendStatus(401);
-
+  
   jwt.verify(token, ACCESS_TOKEN_SECRET, (err, user) => {
     if (err) return res.sendStatus(403);
     req.user = user; // Salva o usuário decifrado no request
@@ -212,7 +212,6 @@ app.put('/api/users/', authenticateToken, async (req, res) => {
     // Verifica se a senha atual foi fornecida e se a nova senha é válida
     if (currentPassword && newPassword) {
       const isMatch = await bcrypt.compare(currentPassword, user.password);
-      console.log(currentPassword, newPassword, user.password, isMatch);
       if (!isMatch) {
         return res.status(401).json({ error: 'Senha atual inválida' });
       }
@@ -386,10 +385,46 @@ app.get('/api/readings/:deviceId', authenticateToken, async (req, res) => {
   }
 });
 
-// Listar todas leituras de um usuario
+// Listar todas leituras de um usuario com paginação e filtro de data
+app.get('/api/readings-filtered/', authenticateToken, async (req, res) => {
+  const { userId } = req.user;
+  const { page = 1, limit = 10, days } = req.query;
+
+  const skip = (page - 1) * parseInt(limit);
+  const query = { userId };
+
+  // Se `days` não for "*", aplica o filtro de data
+  if (days && days !== "*") {
+    const dateFrom = new Date();
+    dateFrom.setDate(dateFrom.getDate() - parseInt(days));
+    query.createdAt = { $gte: dateFrom };
+  }
+
+  try {
+    // Busca as leituras com paginação e filtro de data opcional
+    const readings = await Reading.find(query)
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(parseInt(limit));
+      
+    // Obtém a contagem total de leituras para a paginação
+    const totalReadings = await Reading.countDocuments(query);
+    const totalPages = Math.ceil(totalReadings / limit);
+    
+    // Responde com as leituras e metadados de paginação
+    res.json({
+      items: readings,
+      totalPages,
+      currentPage: parseInt(page),
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Erro ao listar leituras' });
+  }
+});
+
 app.get('/api/readings/', authenticateToken, async (req, res) => {
   const { userId } = req.user;
-
+  
   try {
     const readings = await Reading.find({ userId });
     res.json(readings);
