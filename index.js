@@ -182,6 +182,8 @@ app.post('/api/refresh', authenticateRefreshToken, async (req, res) => {
   }
 });
 
+
+
 // Obter informações do usuário
 app.get('/api/users/', authenticateToken, async (req, res) => {
   try {
@@ -358,13 +360,25 @@ app.post('/api/readings', authenticateToken, async (req, res) => {
   }
 });
 
-// Listar leituras de um dispositivo
+// Listar leituras de um dispositivo com deviceName
 app.get('/api/readings/:deviceId', authenticateToken, async (req, res) => {
   const { deviceId } = req.params;
 
   try {
+    // Encontre o dispositivo pelo deviceId para obter o deviceName
+    const device = await Device.findById(deviceId);
+    if (!device) {
+      return res.status(404).json({ error: 'Dispositivo não encontrado' });
+    }
+
     const readings = await Reading.find({ deviceId });
-    res.json(readings);
+    // Adicione o deviceName a cada leitura retornada
+    const readingsWithDeviceName = readings.map((reading) => ({
+      ...reading.toObject(),
+      deviceName: device.deviceName
+    }));
+
+    res.json(readingsWithDeviceName);
   } catch (err) {
     res.status(500).json({ error: 'Erro ao listar leituras' });
   }
