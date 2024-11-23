@@ -372,11 +372,13 @@ app.get('/api/readings/:deviceId', authenticateToken, async (req, res) => {
       return res.status(404).json({ error: 'Dispositivo não encontrado' });
     }
 
+    // Encontrar as leituras para o dispositivo específico
     const readings = await Reading.find({ deviceId });
-    // Adicione o deviceName a cada leitura retornada
+
+    // Adicionar o deviceName a cada leitura retornada
     const readingsWithDeviceName = readings.map((reading) => ({
-      ...reading.toObject(),
-      deviceName: device.deviceName
+      ...reading.toObject(),  // Converte o objeto mongoose para um objeto simples
+      deviceName: device.deviceName // Adiciona o nome do dispositivo
     }));
 
     res.json(readingsWithDeviceName);
