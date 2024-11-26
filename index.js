@@ -12,6 +12,7 @@ const PORT = process.env.PORT || 3000;
 
 // Conexão com o MongoDB
 const MONGODB_URI = String(process.env.MONGODB_URI);
+console.log(MONGODB_URI, PORT)
 mongoose.connect(MONGODB_URI).then(() => {
   console.log('Conectado ao MongoDB! Servidor rodando na porta ' + PORT);
 }).catch((err) => {
@@ -85,6 +86,7 @@ function generateRefreshToken(payload) {
 const authenticateToken = (req, res, next) => {
   const token = req.headers['authorization']?.split(' ')[1];
   if (!token) return res.sendStatus(401);
+
   
   jwt.verify(token, ACCESS_TOKEN_SECRET, (err, user) => {
     if (err) return res.sendStatus(403);
@@ -212,6 +214,7 @@ app.put('/api/users/', authenticateToken, async (req, res) => {
     // Verifica se a senha atual foi fornecida e se a nova senha é válida
     if (currentPassword && newPassword) {
       const isMatch = await bcrypt.compare(currentPassword, user.password);
+      console.log(currentPassword, newPassword, user.password, isMatch);
       if (!isMatch) {
         return res.status(401).json({ error: 'Senha atual inválida' });
       }
@@ -372,13 +375,11 @@ app.get('/api/readings/:deviceId', authenticateToken, async (req, res) => {
       return res.status(404).json({ error: 'Dispositivo não encontrado' });
     }
 
-    // Encontrar as leituras para o dispositivo específico
     const readings = await Reading.find({ deviceId });
-
-    // Adicionar o deviceName a cada leitura retornada
+    // Adicione o deviceName a cada leitura retornada
     const readingsWithDeviceName = readings.map((reading) => ({
-      ...reading.toObject(),  // Converte o objeto mongoose para um objeto simples
-      deviceName: device.deviceName // Adiciona o nome do dispositivo
+      ...reading.toObject(),
+      deviceName: device.deviceName
     }));
 
     res.json(readingsWithDeviceName);
@@ -387,7 +388,18 @@ app.get('/api/readings/:deviceId', authenticateToken, async (req, res) => {
   }
 });
 
-// Listar todas leituras de um usuario com paginação e filtro de data
+// Listar todas as leituras de um usuário
+app.get('/api/readings/', authenticateToken, async (req, res) => {
+  try {
+    const { userId } = req.user;
+    const readings = await Reading.find({ userId }).sort({ createdAt: -1 });
+    res.json(readings);
+  } catch (err) {
+    res.status(500).json({ error: 'Erro ao listar leituras' });
+  }
+});
+
+// Listar todas as leituras de um usuário com paginação e filtro de data
 app.get('/api/readings-filtered/', authenticateToken, async (req, res) => {
   const { userId } = req.user;
   const { page = 1, limit = 10, days } = req.query;
@@ -403,12 +415,13 @@ app.get('/api/readings-filtered/', authenticateToken, async (req, res) => {
   }
 
   try {
-    // Busca as leituras com paginação e filtro de data opcional
+    // Busca as leituras com paginação e inclui o nome do dispositivo
     const readings = await Reading.find(query)
+      .populate('deviceId', 'name') // Carrega o campo "name" do dispositivo relacionado
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(parseInt(limit));
-      
+
     // Obtém a contagem total de leituras para a paginação
     const totalReadings = await Reading.countDocuments(query);
     const totalPages = Math.ceil(totalReadings / limit);
@@ -424,11 +437,13 @@ app.get('/api/readings-filtered/', authenticateToken, async (req, res) => {
   }
 });
 
+// Listar todas as leituras de um usuário
 app.get('/api/readings/', authenticateToken, async (req, res) => {
   const { userId } = req.user;
-  
+
   try {
-    const readings = await Reading.find({ userId });
+    // Busca as leituras e inclui o nome do dispositivo
+    const readings = await Reading.find({ userId }).populate('deviceId', 'name'); // Carrega o campo "name"
     res.json(readings);
   } catch (err) {
     res.status(500).json({ error: 'Erro ao listar leituras' });
